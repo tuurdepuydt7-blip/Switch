@@ -1,30 +1,460 @@
-const express=require('express');const http=require('http');const crypto=require('crypto');const {Server}=require('socket.io');
-const app=express(),server=http.createServer(app),io=new Server(server);app.use(express.static('public'));
-const rooms=new Map(),colors=['red','blue','green','yellow'];
-function makeDeck(){const d=[];for(const color of colors)for(let n=1;n<=9;n++){for(let i=0;i<((n===1||n===9)?1:2);i++)d.push({type:'number',color,value:n,id:crypto.randomUUID()})}for(const [t,n] of [['switch',4],['skip',4],['draw2',4],['wild',4],['mirror',4],['boom',2],['steal',2]])for(let i=0;i<n;i++)d.push({type:t,id:crypto.randomUUID()});return d.sort(()=>Math.random()-.5)}
-function state(r){return{players:r.players.map(p=>({id:p.id,name:p.name,count:p.hand.length,bot:!!p.bot})),top:r.discard.at(-1),color:r.color,turn:r.players[r.turn]?.id,started:r.started,winner:r.winner||null}}
-function broadcast(c){const r=rooms.get(c);if(r)io.to(c).emit('state',state(r))}function hands(r){r.players.filter(p=>!p.bot).forEach(p=>io.to(p.id).emit('hand',p.hand))}
-function draw(r,p,n=1){for(let i=0;i<n;i++){if(!r.deck.length){if(r.discard.length<=1)break;const top=r.discard.pop();r.deck=r.discard.splice(0).sort(()=>Math.random()-.5);r.discard=[top]}if(r.deck.length)p.hand.push(r.deck.pop())}}
-function can(c,r){const t=r.discard.at(-1);return c&&(['wild','switch','skip','draw2','mirror','boom','steal'].includes(c.type)||c.color===r.color||c.value===t?.value)}
-function next(r,n=1){r.turn=(r.turn+n)%r.players.length}
-function start(r){r.deck=makeDeck();r.discard=[];r.players.forEach(p=>p.hand=[]);for(let i=0;i<7;i++)r.players.forEach(p=>p.hand.push(r.deck.pop()));let f=r.deck.pop();while(f.type!=='number'){r.deck.unshift(f);f=r.deck.pop()}r.discard.push(f);r.color=f.color;r.turn=0;r.started=true;r.winner=null}
-function botColor(h){const n=Object.fromEntries(colors.map(c=>[c,0]));h.forEach(c=>c.color&&(n[c.color]++));return colors.sort((a,b)=>n[b]-n[a])[0]}
-function after(r,c,p){if(p.hand.length===0){r.winner=p.id;broadcast(c);hands(r);return}broadcast(c);hands(r);setTimeout(()=>botTurn(c),450)}
-function play(r,c,p,i,wildColor){const card=p.hand[i];if(!card||!can(card,r)||r.winner)return;p.hand.splice(i,1);r.discard.push(card);if(card.type==='wild')r.color=colors.includes(wildColor)?wildColor:r.color;else if(card.color)r.color=card.color;
-if(card.type==='switch'){const hs=r.players.map(x=>x.hand);r.players.forEach((x,i)=>x.hand=hs[(i+1)%r.players.length]);next(r)}
-else if(card.type==='skip')next(r,2);
-else if(card.type==='draw2'){next(r);draw(r,r.players[r.turn],2);next(r)}
-else if(card.type==='mirror'){next(r);const need=r.discard.at(-2),q=r.players[r.turn];if(!q.hand.some(x=>x.type==='number'&&x.value===need?.value)){draw(r,q,2);next(r)}}
-else if(card.type==='boom'){const pool=[];r.players.forEach(x=>x.hand.length&&pool.push(x.hand.splice(Math.floor(Math.random()*x.hand.length),1)[0]));r.players.forEach(x=>pool.length&&x.hand.push(pool[Math.floor(Math.random()*pool.length)]));next(r)}
-else if(card.type==='steal'){next(r);const q=r.players[r.turn];if(q.hand.length)p.hand.push(q.hand.splice(Math.floor(Math.random()*q.hand.length),1)[0]);next(r)}else next(r);after(r,c,p)}
-function botTurn(c){const r=rooms.get(c);if(!r||!r.started||r.winner)return;const b=r.players[r.turn];if(!b?.bot)return;const opts=b.hand.map((x,i)=>({x,i})).filter(o=>can(o.x,r));if(!opts.length){draw(r,b);next(r);broadcast(c);hands(r);return setTimeout(()=>botTurn(c),500)}let o=opts.find(x=>x.x.type==='draw2')||opts.find(x=>x.x.type==='number')||opts[0];play(r,c,b,o.i,o.x.type==='wild'?botColor(b.hand):undefined)}
-function addBots(r,n){for(let i=0;i<n;i++)r.players.push({id:'bot-'+crypto.randomUUID(),name:`Bot ${i+1}`,hand:[],bot:true})}function code(){let c=Math.random().toString(36).slice(2,6).toUpperCase();while(rooms.has(c))c=Math.random().toString(36).slice(2,6).toUpperCase();return c}
-io.on('connection',s=>{
- s.on('create',({name},cb)=>{const c=code();rooms.set(c,{players:[{id:s.id,name:(name||'Speler').slice(0,18),hand:[]}],started:false,deck:[],discard:[],turn:0,color:null});s.join(c);s.data.code=c;cb({code:c});broadcast(c)});
- s.on('createBots',({name,count},cb)=>{const c=code(),r={players:[{id:s.id,name:(name||'Speler').slice(0,18),hand:[]}],started:false,deck:[],discard:[],turn:0,color:null};addBots(r,Math.max(1,Math.min(5,Number(count)||1)));rooms.set(c,r);s.join(c);s.data.code=c;cb({code:c});broadcast(c)});
- s.on('join',({code:c,name},cb)=>{c=String(c||'').toUpperCase();const r=rooms.get(c);if(!r||r.started||r.players.length>=6)return cb({error:'Room bestaat niet, is al gestart of zit vol.'});r.players.push({id:s.id,name:(name||'Speler').slice(0,18),hand:[]});s.join(c);s.data.code=c;cb({code:c});broadcast(c)});
- s.on('start',()=>{const r=rooms.get(s.data.code);if(r&&r.players[0].id===s.id&&r.players.length>=2){start(r);broadcast(s.data.code);hands(r);setTimeout(()=>botTurn(s.data.code),600)}});
- s.on('play',({index,wildColor})=>{const c=s.data.code,r=rooms.get(c);if(!r||!r.started||r.winner||r.players[r.turn]?.id!==s.id)return;play(r,c,r.players[r.turn],index,wildColor)});
- s.on('draw',()=>{const c=s.data.code,r=rooms.get(c);if(!r||!r.started||r.winner||r.players[r.turn]?.id!==s.id)return;draw(r,r.players[r.turn]);next(r);broadcast(c);hands(r);setTimeout(()=>botTurn(c),450)});
- s.on('disconnect',()=>{const c=s.data.code,r=rooms.get(c);if(!r)return;r.players=r.players.filter(p=>p.id!==s.id);if(!r.players.length)rooms.delete(c);else{if(r.turn>=r.players.length)r.turn=0;broadcast(c);hands(r);setTimeout(()=>botTurn(c),300)}})
-});server.listen(process.env.PORT||3000,()=>console.log('SWITCH draait op http://localhost:'+(process.env.PORT||3000)));
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+app.use(express.static("public"));
+
+const rooms = new Map();
+
+const COLORS = ["red", "blue", "green", "yellow"];
+
+function createDeck() {
+    const deck = [];
+
+    for (const color of COLORS) {
+        for (let n = 1; n <= 9; n++) {
+            const amount = (n === 1 || n === 9) ? 1 : 2;
+
+            for (let i = 0; i < amount; i++) {
+                deck.push({
+                    type: "number",
+                    color,
+                    value: n
+                });
+            }
+        }
+    }
+
+    for (let i = 0; i < 4; i++) {
+        deck.push({ type: "switch", color: null });
+        deck.push({ type: "skip", color: null });
+        deck.push({ type: "draw2", color: null });
+        deck.push({ type: "wild", color: null });
+        deck.push({ type: "mirror", color: null });
+    }
+
+    for (let i = 0; i < 2; i++) {
+        deck.push({ type: "boom", color: null });
+        deck.push({ type: "steal", color: null });
+    }
+
+    return shuffle(deck);
+}
+
+function shuffle(array) {
+    return array.sort(() => Math.random() - 0.5);
+}
+
+function createPlayer(id, name, isBot = false) {
+    return {
+        id,
+        name,
+        isBot,
+        hand: []
+    };
+}
+
+function canPlay(card, topCard, currentColor) {
+    if (card.type === "wild" ||
+        card.type === "switch" ||
+        card.type === "skip" ||
+        card.type === "draw2" ||
+        card.type === "mirror" ||
+        card.type === "boom" ||
+        card.type === "steal") {
+        return true;
+    }
+
+    return (
+        card.color === currentColor ||
+        card.value === topCard.value
+    );
+}
+
+function drawCard(room) {
+    if (room.deck.length === 0) {
+        const top = room.discard.pop();
+
+        room.deck = shuffle(room.discard);
+        room.discard = [top];
+    }
+
+    return room.deck.pop();
+}
+
+function broadcastRoom(room) {
+    for (const player of room.players) {
+        if (player.isBot) continue;
+
+        io.to(player.id).emit("gameState", {
+            players: room.players.map(p => ({
+                id: p.id,
+                name: p.name,
+                cards: p.hand.length,
+                isBot: p.isBot
+            })),
+            hand: player.hand,
+            topCard: room.discard[room.discard.length - 1],
+            currentColor: room.currentColor,
+            currentPlayer: room.players[room.turn].id,
+            started: room.started,
+            winner: room.winner
+        });
+    }
+}
+
+function nextTurn(room) {
+    room.turn =
+        (room.turn + 1) % room.players.length;
+
+    broadcastRoom(room);
+
+    const player = room.players[room.turn];
+
+    if (player.isBot && !room.winner) {
+        setTimeout(() => botTurn(room), 700);
+    }
+}
+
+function finishIfNeeded(room, player) {
+    if (player.hand.length === 0) {
+        room.winner = player.name;
+        broadcastRoom(room);
+        return true;
+    }
+
+    return false;
+}
+
+function playCard(room, player, index) {
+    if (room.players[room.turn] !== player) return;
+
+    const card = player.hand[index];
+
+    if (!card) return;
+
+    const top = room.discard[room.discard.length - 1];
+
+    if (!canPlay(card, top, room.currentColor)) {
+        return;
+    }
+
+    player.hand.splice(index, 1);
+    room.discard.push(card);
+
+    if (card.color) {
+        room.currentColor = card.color;
+    }
+
+    switch (card.type) {
+        case "skip":
+            room.turn =
+                (room.turn + 2) % room.players.length;
+            break;
+
+        case "draw2": {
+            const next =
+                room.players[(room.turn + 1) % room.players.length];
+
+            next.hand.push(drawCard(room));
+            next.hand.push(drawCard(room));
+
+            room.turn =
+                (room.turn + 2) % room.players.length;
+            break;
+        }
+
+        case "switch":
+            switchHands(room);
+            room.turn =
+                (room.turn + 1) % room.players.length;
+            break;
+
+        case "mirror":
+            room.turn =
+                (room.turn + 1) % room.players.length;
+            break;
+
+        case "boom":
+            boom(room);
+            room.turn =
+                (room.turn + 1) % room.players.length;
+            break;
+
+        case "steal":
+            stealRandom(room, player);
+            room.turn =
+                (room.turn + 1) % room.players.length;
+            break;
+
+        default:
+            room.turn =
+                (room.turn + 1) % room.players.length;
+    }
+
+    if (card.type === "wild") {
+        room.currentColor =
+            COLORS[Math.floor(Math.random() * COLORS.length)];
+    }
+
+    if (finishIfNeeded(room, player)) return;
+
+    broadcastRoom(room);
+
+    const next = room.players[room.turn];
+
+    if (next.isBot) {
+        setTimeout(() => botTurn(room), 700);
+    }
+}
+
+function switchHands(room) {
+    const hands = room.players.map(p => p.hand);
+
+    for (let i = 0; i < room.players.length; i++) {
+        room.players[i].hand =
+            hands[(i + 1) % hands.length];
+    }
+}
+
+function boom(room) {
+    const selected = [];
+
+    for (const player of room.players) {
+        if (player.hand.length > 0) {
+            const index =
+                Math.floor(Math.random() * player.hand.length);
+
+            selected.push(player.hand.splice(index, 1)[0]);
+        }
+    }
+
+    shuffle(selected);
+
+    for (const player of room.players) {
+        if (selected.length === 0) break;
+        player.hand.push(selected.pop());
+    }
+}
+
+function stealRandom(room, player) {
+    const others =
+        room.players.filter(p => p !== player && p.hand.length > 0);
+
+    if (others.length === 0) return;
+
+    const target =
+        others[Math.floor(Math.random() * others.length)];
+
+    const index =
+        Math.floor(Math.random() * target.hand.length);
+
+    const stolen = target.hand.splice(index, 1)[0];
+
+    player.hand.push(stolen);
+}
+
+function botTurn(room) {
+    if (room.winner) return;
+
+    const bot = room.players[room.turn];
+
+    if (!bot || !bot.isBot) return;
+
+    const top =
+        room.discard[room.discard.length - 1];
+
+    const playable = bot.hand
+        .map((card, index) => ({ card, index }))
+        .filter(x =>
+            canPlay(x.card, top, room.currentColor)
+        );
+
+    if (playable.length === 0) {
+        const card = drawCard(room);
+
+        if (card) bot.hand.push(card);
+
+        broadcastRoom(room);
+
+        nextTurn(room);
+        return;
+    }
+
+    playable.sort((a, b) => {
+        return bot.hand.filter(c => c.color === b.card.color).length -
+               bot.hand.filter(c => c.color === a.card.color).length;
+    });
+
+    const chosen = playable[0];
+
+    playCard(room, bot, chosen.index);
+}
+
+function startGame(room) {
+    room.deck = createDeck();
+    room.discard = [];
+    room.currentColor = null;
+    room.turn = 0;
+    room.started = true;
+    room.winner = null;
+
+    for (const player of room.players) {
+        player.hand = [];
+
+        for (let i = 0; i < 7; i++) {
+            player.hand.push(drawCard(room));
+        }
+    }
+
+    let first = drawCard(room);
+
+    while (
+        first.type !== "number"
+    ) {
+        room.deck.unshift(first);
+        first = drawCard(room);
+    }
+
+    room.discard.push(first);
+    room.currentColor = first.color;
+
+    broadcastRoom(room);
+}
+
+io.on("connection", socket => {
+
+    socket.on("createRoom", ({ name, bots }) => {
+        const code =
+            Math.random()
+                .toString(36)
+                .substring(2, 6)
+                .toUpperCase();
+
+        const room = {
+            code,
+            players: [],
+            deck: [],
+            discard: [],
+            currentColor: null,
+            turn: 0,
+            started: false,
+            winner: null
+        };
+
+        room.players.push(
+            createPlayer(socket.id, name || "Speler")
+        );
+
+        for (let i = 0; i < Number(bots); i++) {
+            room.players.push(
+                createPlayer(
+                    `bot-${i}-${Date.now()}`,
+                    `Bot ${i + 1}`,
+                    true
+                )
+            );
+        }
+
+        rooms.set(code, room);
+
+        socket.join(code);
+
+        socket.emit("roomCreated", code);
+
+        startGame(room);
+    });
+
+    socket.on("joinRoom", ({ code, name }) => {
+        const room = rooms.get(code);
+
+        if (!room) {
+            socket.emit("errorMessage", "Room bestaat niet.");
+            return;
+        }
+
+        if (room.players.length >= 6) {
+            socket.emit("errorMessage", "Deze room zit vol.");
+            return;
+        }
+
+        if (room.started) {
+            socket.emit("errorMessage", "Het spel is al gestart.");
+            return;
+        }
+
+        room.players.push(
+            createPlayer(
+                socket.id,
+                name || `Speler ${room.players.length + 1}`
+            )
+        );
+
+        socket.join(code);
+
+        broadcastRoom(room);
+    });
+
+    socket.on("playCard", ({ code, index }) => {
+        const room = rooms.get(code);
+
+        if (!room || room.winner) return;
+
+        const player =
+            room.players.find(p => p.id === socket.id);
+
+        if (!player) return;
+
+        playCard(room, player, index);
+    });
+
+    socket.on("drawCard", ({ code }) => {
+        const room = rooms.get(code);
+
+        if (!room || room.winner) return;
+
+        const player =
+            room.players.find(p => p.id === socket.id);
+
+        if (!player) return;
+
+        if (room.players[room.turn] !== player) return;
+
+        const card = drawCard(room);
+
+        if (card) player.hand.push(card);
+
+        nextTurn(room);
+    });
+
+    socket.on("startGame", code => {
+        const room = rooms.get(code);
+
+        if (!room) return;
+
+        if (!room.started) {
+            startGame(room);
+        }
+    });
+
+    socket.on("disconnect", () => {
+        for (const [code, room] of rooms) {
+            room.players =
+                room.players.filter(p => p.id !== socket.id);
+
+            if (room.players.length === 0) {
+                rooms.delete(code);
+            } else {
+                broadcastRoom(room);
+            }
+        }
+    });
+});
+
+server.listen(3000, () => {
+    console.log("SWITCH draait op http://localhost:3000");
+});
