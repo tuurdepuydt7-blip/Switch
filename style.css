@@ -1,1 +1,155 @@
-*{box-sizing:border-box}body{margin:0;font-family:system-ui;background:linear-gradient(135deg,#17172b,#292957);color:white;min-height:100vh}main{max-width:1000px;margin:auto;padding:24px}h1{text-align:center;font-size:48px;margin:10px}.top{display:flex;justify-content:space-between;align-items:center}.top button,button{border:0;border-radius:12px;padding:11px 16px;font-weight:700;cursor:pointer}input{padding:12px;border-radius:10px;border:0;margin:5px}.table{display:flex;flex-direction:column;align-items:center;gap:10px;padding:30px}.card{width:110px;height:155px;border-radius:18px;display:grid;place-items:center;font-size:42px;font-weight:900;box-shadow:0 10px 25px #0006}.players{display:flex;gap:8px;flex-wrap:wrap}.player{background:#ffffff18;padding:8px 12px;border-radius:10px}.active{outline:3px solid #fff}.hand{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}.hand .card{width:75px;height:105px;font-size:30px;cursor:pointer}.red{background:#e74c3c}.blue{background:#3498db}.green{background:#27ae60}.yellow{background:#f1c40f;color:#111}.special{background:#5d5d7d}.actions{text-align:center;margin:20px}#modal{position:fixed;inset:0;background:#000b;display:grid;place-items:center}#modal>div{background:#22223b;padding:25px;border-radius:18px;text-align:center}#modal button{margin:5px}.msg{color:#ffb3b3}
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>SWITCH!</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<div id="menu" class="screen">
+
+    <h1>SWITCH!</h1>
+
+    <input
+        id="name"
+        placeholder="Je naam"
+        maxlength="15"
+    >
+
+    <button onclick="showBots()">
+        🤖 Spelen tegen bots
+    </button>
+
+    <button onclick="showOnline()">
+        🌐 Online spelen
+    </button>
+
+</div>
+
+
+<div id="botMenu" class="screen hidden">
+
+    <h2>Spelen tegen bots</h2>
+
+    <button onclick="startBots(1)">1 bot</button>
+    <button onclick="startBots(2)">2 bots</button>
+    <button onclick="startBots(3)">3 bots</button>
+    <button onclick="startBots(4)">4 bots</button>
+    <button onclick="startBots(5)">5 bots</button>
+
+    <button onclick="backToMenu()">
+        ← Terug
+    </button>
+
+</div>
+
+
+<div id="onlineMenu" class="screen hidden">
+
+    <h2>Online spelen</h2>
+
+    <input
+        id="room"
+        placeholder="Roomcode"
+        maxlength="6"
+    >
+
+    <button onclick="joinRoom()">
+        Join room
+    </button>
+
+    <button onclick="createOnlineRoom()">
+        Nieuwe room
+    </button>
+
+    <button onclick="backToMenu()">
+        ← Terug
+    </button>
+
+</div>
+
+
+<div id="game" class="hidden">
+
+    <header>
+
+        <h1>SWITCH!</h1>
+
+        <div>
+            Room:
+            <strong id="roomCode">-</strong>
+        </div>
+
+    </header>
+
+
+    <section id="players"></section>
+
+
+    <main>
+
+        <div class="opponent-area">
+
+            <h3>Spelers</h3>
+
+            <div id="opponents"></div>
+
+        </div>
+
+
+        <div class="table">
+
+            <div>
+                <span>Huidige kleur:</span>
+                <strong id="currentColor">-</strong>
+            </div>
+
+            <div
+                id="topCard"
+                class="card"
+            ></div>
+
+            <button
+                id="drawButton"
+                onclick="drawCard()"
+            >
+                Pak kaart
+            </button>
+
+        </div>
+
+
+        <div class="hand-area">
+
+            <h2>Jouw kaarten</h2>
+
+            <div id="hand"></div>
+
+        </div>
+
+    </main>
+
+
+    <div id="winner" class="winner hidden">
+
+        <h1 id="winnerText"></h1>
+
+        <button onclick="location.reload()">
+            Opnieuw
+        </button>
+
+    </div>
+
+</div>
+
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="game.js"></script>
+
+</body>
+</html>
